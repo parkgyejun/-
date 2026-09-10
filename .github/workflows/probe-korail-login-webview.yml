@@ -7,7 +7,7 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -40,41 +40,45 @@ jobs:
           EOF
           cat > probe/app/src/main/java/test/korail/MainActivity.java <<'EOF'
           package test.korail;
-          import android.app.*; import android.os.*; import android.util.Log; import android.webkit.*; import android.widget.*;
+          import android.app.*; import android.os.*; import android.util.Log; import android.webkit.*;
           public class MainActivity extends Activity {
             public void onCreate(Bundle b){super.onCreate(b); WebView w=new WebView(this); setContentView(w); WebSettings s=w.getSettings(); s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true); CookieManager.getInstance().setAcceptCookie(true); CookieManager.getInstance().setAcceptThirdPartyCookies(w,true); w.setWebViewClient(new WebViewClient(){ public void onPageFinished(WebView v,String u){ super.onPageFinished(v,u); new Handler().postDelayed(()->v.evaluateJavascript("(()=>{const q=s=>!!document.querySelector(s),t=document.body?.innerText||'';return JSON.stringify({url:location.href,id:q('#id')||q('input[name=id]'),pw:q('#password')||q('input[type=password]'),login:[...document.querySelectorAll('button,a')].some(e=>(e.innerText||'').trim()==='로그인'),kakao:t.includes('카카오 로그인'),apple:t.includes('Apple 로그인')||t.includes('애플 로그인')})})()",r->Log.i("KORAIL_PROBE",r)),3000); }}); w.loadUrl("https://www.korail.com/ticket/login"); }
           }
           EOF
-      - name: Install SDK and build
+      - name: Install build SDK and build probe
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
           cd probe && gradle --no-daemon :app:assembleDebug
-      - name: Enable KVM and boot
+      - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules; sudo udevadm trigger --name-match=kvm || true
-          echo no | avdmanager create avd -n probe -k 'system-images;android-35;google_apis;x86_64' --force
-          nohup emulator -avd probe -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim > /tmp/emulator.log 2>&1 &
-          adb wait-for-device
-          for i in $(seq 1 180); do [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ] && break; sleep 2; done
-      - name: Probe login page
-        run: |
-          adb install -r probe/app/build/outputs/apk/debug/app-debug.apk
-          adb logcat -c
-          adb shell am start -n test.korail/.MainActivity
-          sleep 15
-          adb logcat -d -s KORAIL_PROBE:I '*:S' | tee /tmp/probe.log
-          adb exec-out screencap -p > /tmp/probe.png
-          grep -q '"id":true' /tmp/probe.log
-          grep -q '"pw":true' /tmp/probe.log
-          grep -q '"login":true' /tmp/probe.log
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Run probe in Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
+          script: |
+            adb install -r probe/app/build/outputs/apk/debug/app-debug.apk
+            adb logcat -c
+            adb shell am start -n test.korail/.MainActivity
+            sleep 15
+            adb logcat -d -s KORAIL_PROBE:I '*:S' | tee /tmp/probe.log
+            adb exec-out screencap -p > /tmp/probe.png
+            grep -q '"id":true' /tmp/probe.log
+            grep -q '"pw":true' /tmp/probe.log
+            grep -q '"login":true' /tmp/probe.log
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: korail-login-webview-probe
+          name: korail-login-webview-probe-v2
           path: |
             /tmp/probe.log
             /tmp/probe.png
-            /tmp/emulator.log
