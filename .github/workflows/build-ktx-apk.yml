@@ -1,0 +1,39 @@
+name: Build KTX Seat Watcher APK
+
+on:
+  push:
+    branches: [ ktx-seat-watcher-build ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct project
+        shell: bash
+        run: |
+          cat ktx-apk-build/payload.part*.b64 | base64 -d > /tmp/ktx.zip
+          unzip -q /tmp/ktx.zip -d /tmp/ktx
+          cp -R /tmp/ktx/KTXSeatWatcher ./KTXSeatWatcher
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Build APK
+        working-directory: KTXSeatWatcher
+        run: gradle --no-daemon :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KTXSeatWatcher-1.5sec-general-apk
+          path: KTXSeatWatcher/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
