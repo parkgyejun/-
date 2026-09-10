@@ -1,0 +1,39 @@
+name: Build KTX v2 APK
+
+on:
+  push:
+    branches: [ ktx-seat-watcher-build ]
+    paths:
+      - 'ktx-v2/**'
+      - '.github/workflows/build-ktx-v2.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct project
+        run: |
+          cat ktx-v2/payload.part*.b64 | base64 -d > /tmp/KTXSeatWatcher_v2.zip
+          rm -rf KTXSeatWatcher
+          unzip -q /tmp/KTXSeatWatcher_v2.zip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Build APK
+        working-directory: KTXSeatWatcher
+        run: gradle --no-daemon :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KTXSeatWatcher-v2-apk
+          path: KTXSeatWatcher/app/build/outputs/apk/debug/app-debug.apk
